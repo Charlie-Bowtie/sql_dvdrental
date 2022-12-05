@@ -1,0 +1,117 @@
+/What is the distribution of family-friendly films through rental duration quartiles?/
+
+WITH t1 AS
+ (SELECT c.name film_category,
+      NTILE(4) OVER (ORDER BY f.rental_duration)
+      AS standard_quartile
+  FROM film f
+    JOIN film_category fc
+    ON f.film_id = fc.film_id
+    JOIN category c
+    ON c.category_id = fc.category_id
+  WHERE c.name = 'Animation' OR c.name = 'Children'
+  OR c.name = 'Classics' OR c.name = 'Comedy' OR
+  c.name = 'Family' OR c.name = 'Music')
+
+SELECT film_category, standard_quartile, COUNT(*) film_quartile_count
+FROM t1
+GROUP BY 1,2
+ORDER BY 1,2;
+
+
+/How many rental orders is each store fulfilling per month?/
+
+SELECT DATE_PART('month',rental_date) rental_month,
+    DATE_PART('year',rental_date) rental_year,
+    s.store_id, COUNT(*) rental_count
+FROM rental r
+  JOIN staff s
+  ON s.staff_id = r.staff_id
+GROUP BY 1,2,3
+ORDER BY 4 DESC;
+
+
+/What do the monthly spending habits of our top ten customers look like?/
+
+WITH t1 AS
+  (SELECT customer_id,
+    SUM(amount) total_amt
+  FROM payment
+  GROUP BY 1
+  ORDER BY 2 DESC
+  LIMIT 10),
+
+t2 AS
+(SELECT DATE_TRUNC('month', payment_date)pay_month,
+    CONCAT(first_name,' ',last_name)fullname,
+    COUNT(*) pay_countpermonth,
+    SUM(p.amount) pay_amount
+FROM payment p
+  JOIN t1
+  ON t1.customer_id = p.customer_id
+  JOIN customer c
+  ON t1.customer_id = c.customer_id
+GROUP BY 1,2
+ORDER BY 2,1)
+
+SELECT DISTINCT fullname,
+    AVG(pay_countpermonth) OVER full_name AS avg_paycount,
+    SUM(pay_countpermonth) OVER full_name AS total_month_paycount,
+    AVG(pay_amount) OVER full_name AS avg_month_pay,
+    MIN(pay_amount) OVER full_name AS min_pay,
+    MAX(pay_amount) OVER full_name AS max_pay
+FROM t2
+WINDOW full_name AS
+    (PARTITION BY fullname)
+ORDER BY 3 DESC;
+
+
+/How do genres rank based on the number of rentals from the top 10 paying customers?/
+
+WITH t1 AS
+     (SELECT customer_id,
+         SUM(amount) total_amt
+     FROM payment
+     GROUP BY 1
+     ORDER BY 2 DESC
+     LIMIT 10)
+
+SELECT c.name category, COUNT(*) rent_count,
+    DENSE_RANK () OVER(ORDER BY (COUNT(*))DESC) rank
+FROM rental r
+  JOIN t1
+  ON t1.customer_id = r.customer_id
+  JOIN inventory i
+  ON i.inventory_id = r.inventory_id
+  JOIN film f
+  ON i.film_id = f.film_id
+  JOIN film_category fc
+  ON fc.film_id = f.film_id
+  JOIN category c
+  ON c.category_id = fc.category_id
+GROUP BY 1
+ORDER BY 2 DESC;
+
+
+/Extra Query for review: this query was for question 3 in question set 2/
+
+WITH t1 AS
+(SELECT customer_id,
+    SUM(amount) total_amt
+FROM payment
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10)
+
+SELECT DATE_TRUNC('month', payment_date)pay_month,
+    CONCAT(first_name,' ',last_name)fullname,
+    COUNT(*) pay_countpermonth,
+    SUM(p.amount) pay_amount,
+    SUM(p.amount)-LAG(SUM(p.amount)) OVER (ORDER BY 2,1) AS lag_difference
+FROM payment p
+JOIN t1
+ON t1.customer_id = p.customer_id
+JOIN customer c
+ON t1.customer_id = c.customer_id
+GROUP BY 1,2
+ORDER BY 2,1
